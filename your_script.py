@@ -72,7 +72,7 @@ def generate_tweet_from_news(articles: list) -> str:
     # Gemini(PaLM API)の初期設定
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash-latest",
+        model_name="gemini-2.5-flash-lite-preview-06-17",
         system_instruction="主観的にツイート内容をツイッターの文字数制限内で生成。日本語で。人間のなにげないおもしろツイート風で"
     )
 
