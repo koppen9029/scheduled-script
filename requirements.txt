@@ -1,3 +1,4 @@
 requests
 requests-oauthlib
+packaging>=24.0
 google-generativeai
