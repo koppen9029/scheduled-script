@@ -58,11 +58,15 @@ def get_news() -> list:
 def generate_tweet_from_news(articles: list) -> str:
     """
     取得したニュース記事を元にGemini(PaLM API)でツイート文を生成する関数。
+    Gemini側で安全フィルタ等によりブロックされた場合でも、
+    例外を投げずにフォールバック文を返すようにしている。
     """
     # ニュース記事をプロンプトとして連結
     prompt = (
-        "以下のツイート内容から倫理的、モラル的に不適切な内容を除外したうえで面白い話を選んだうえで、"
-        "日本語で1つのユニークなまるで人が書いたつぶやきのようなツイート文のみひとつだけ作成してください（140文字程度以内）：\n"
+        "以下のニュース一覧から、倫理的・モラル的に不適切な内容を除外した上で、"
+        "日本語で1つのユニークな、まるで人が書いたつぶやきのようなツイート文だけを"
+        "140文字以内で作成してください。\n"
+        "ニュース一覧:\n"
     )
     for article in articles:
         title = article.get("title", "タイトル不明")
@@ -73,19 +77,54 @@ def generate_tweet_from_news(articles: list) -> str:
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(
         model_name="gemini-2.5-flash",
-        system_instruction="主観的にツイート内容をツイッターの文字数制限内で生成。日本語で。人間のなにげないおもしろツイート風で"
+        system_instruction=(
+            "主観的にツイート内容をツイッターの文字数制限内で生成。"
+            "日本語で、人間の何気ないおもしろツイート風で。"
+            "不適切・攻撃的・差別的な内容は必ず避けること。"
+        ),
     )
 
     # テキスト生成（max_output_tokensは必要に応じて調整可能）
     response = model.generate_content(
         [prompt],
         generation_config=genai.types.GenerationConfig(
-            max_output_tokens=100  # 生成するトークン数の上限（適宜調整）
+            max_output_tokens=100
         ),
     )
 
-    generated_text = response.text
-    return generated_text
+    # --- ここからエラー対策 ---
+    try:
+        generated_text = response.text  # ここで ValueError が出ることがある
+        if generated_text and generated_text.strip():
+            # 正常に生成できた
+            return generated_text.strip()
+    except ValueError as e:
+        # テキストが返ってこなかった場合（安全フィルタ等でブロック）
+        print("Geminiのレスポンスからtextを取得できませんでした:", e)
+
+    # ここまで来たら response.text は使えなかったということなので、
+    # ログ用途で追加情報を出しておく（GitHub Actionsのログで確認用）
+    try:
+        print("prompt_feedback:", getattr(response, "prompt_feedback", None))
+        for i, c in enumerate(getattr(response, "candidates", [])):
+            fr = getattr(c, "finish_reason", None)
+            sr = getattr(c, "safety_ratings", None)
+            print(f"candidate[{i}] finish_reason={fr}, safety_ratings={sr}")
+    except Exception as log_e:
+        print("Geminiレスポンス詳細ログ出力中にエラー:", log_e)
+
+    # --- フォールバック：自前でテキストを生成して返す ---
+    # 例: 一番最初のニュースのタイトルだけから適当にそれっぽいツイートを組み立てる
+    if articles:
+        first = articles[0]
+        title = first.get("title", "")
+        fallback = f"ニュース眺めてたら「{title[:40]}」って見出しがあって、今日も世界は騒がしいな〜ってなってる。"
+        # 念のため140文字以内に収める
+        return fallback[:140]
+
+    # 記事もない場合の最後の砦
+    return "今日はあまり面白いニュースが拾えなかったので、静かに過ごしてます。"
+
 
 def post_tweet(text: str) -> bool:
     """
