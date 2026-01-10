@@ -62,7 +62,7 @@ def generate_tweet(articles: list) -> str:
 
     # 生成
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-2.0-flash",
         contents=prompt,
         config=types.GenerateContentConfig(max_output_tokens=150),
     )
