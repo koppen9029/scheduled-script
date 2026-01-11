@@ -23,12 +23,15 @@ def get_my_user_id():
     print("ユーザーID取得失敗:", r.status_code, r.text)
     return ""
 
-# — ② タイムライン取得（画像URL含む） —
-def get_timeline_with_media(user_id, count=50):
+# — ② ホームタイムライン取得（除外指定付き & API側フィルタ） —
+def get_home_timeline_filtered(user_id, count=50):
     url = f"https://api.twitter.com/2/users/{user_id}/timelines/reverse_chronological"
     params = {
         "max_results": count,
-        "tweet.fields": "public_metrics,conversation_id,attachments,text",
+        # API側でリツイート & 返信を除外
+        "exclude": "retweets,replies",
+        # 追加で詳細を取りたいフィールド
+        "tweet.fields": "public_metrics,attachments,text,referenced_tweets",
         "expansions": "attachments.media_keys",
         "media.fields": "url,type"
     }
@@ -40,24 +43,35 @@ def get_timeline_with_media(user_id, count=50):
     tweets = data.get("data", [])
     media_list = data.get("includes", {}).get("media", [])
     media_map = {m["media_key"]: m for m in media_list}
-    return tweets, media_map
 
-# — 返信数が最大のツイートを探す —
+    # — 自前フィルタで確実に除外!
+    filtered = []
+    for t in tweets:
+        # referenced_tweets があるとリツイート・返信・引用の可能性があるため除去
+        refs = t.get("referenced_tweets", [])
+        if any(r["type"] in ["retweeted","replied_to","quoted"] for r in refs):
+            continue
+        filtered.append(t)
+
+    return filtered, media_map
+
+# — ③ 返信数が最大のツイート選ぶ —
 def pick_best_tweet(tweets):
     if not tweets:
         return None
     return max(tweets, key=lambda x: x.get("public_metrics", {}).get("reply_count", 0))
 
-# — Gemini 返信生成 —
+# — ④ Gemini 返信文生成 —
 def generate_reply(tweet_text: str, media_urls: list[str]) -> str:
     client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = "以下のツイートと画像から自然で丁寧な返信を考えて下さい:\n"
-    prompt += f"ツイート本文: {tweet_text}\n"
+
+    prompt = "以下の投稿（テキスト＋画像URL）を見て、自然で丁寧な返信文を日本語で考えてください:\n"
+    prompt += f"投稿本文: {tweet_text}\n"
     if media_urls:
-        prompt += "関連画像URL:\n"
+        prompt += "画像リンク:\n"
         for url in media_urls:
             prompt += f"{url}\n"
-    prompt += "\n返信:"
+    prompt += "\n返信文:"
 
     response = client.models.generate_content(
         model="gemini-2.0-flash",
@@ -65,13 +79,14 @@ def generate_reply(tweet_text: str, media_urls: list[str]) -> str:
         config=types.GenerateContentConfig(max_output_tokens=120),
     )
     text = (response.text or "").strip()
-    # フォールバック: 返信スキップ
+
+    # 短すぎる場合は投稿しない（フォールバックしない）
     if len(text) < 10:
-        print("返信生成が短すぎるのでスキップ〜")
+        print("返信の生成が短すぎるのでスキップ〜")
         return ""
     return text
 
-# — 返信投稿 —
+# — ⑤ リプライ投稿 —
 def post_reply(reply_text: str, reply_to_id: str) -> bool:
     url = "https://api.twitter.com/2/tweets"
     payload = {
@@ -91,17 +106,17 @@ def main():
     if not user_id:
         return
 
-    tweets, media_map = get_timeline_with_media(user_id)
+    tweets, media_map = get_home_timeline_filtered(user_id)
     best = pick_best_tweet(tweets)
     if not best:
-        print("返信対象なし〜")
+        print("返信対象がないよ〜")
         return
 
     tweet_id = best["id"]
     text = best["text"]
-    print("対象:", text)
+    print("対象ツイート:", text)
 
-    # 画像URL抽出
+    # — 画像URL を集める —
     media_urls = []
     if best.get("attachments"):
         for key in best["attachments"].get("media_keys", []):
@@ -109,12 +124,12 @@ def main():
             if m and "url" in m:
                 media_urls.append(m["url"])
 
-    # Gemini 返信生成
+    # — Gemini で返信文を生成 —
     reply = generate_reply(text, media_urls)
     if not reply:
         return
 
-    print("生成:", reply)
+    print("生成された返信文:", reply)
     post_reply(reply, tweet_id)
 
 if __name__ == "__main__":
