@@ -1,0 +1,33 @@
+name: Run Python Script Every Day at 21:00 JST
+
+on:
+  schedule:
+    - cron: '0 12 * * *'  # Daily at 12:00 UTC = 21:00 JST
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    env:
+      CONSUMER_KEY: ${{ secrets.CONSUMER_KEY }}
+      CONSUMER_SECRET: ${{ secrets.CONSUMER_SECRET }}
+      ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      ACCESS_TOKEN_SECRET: ${{ secrets.ACCESS_TOKEN_SECRET }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run the script
+        run: python auto_reply.py
