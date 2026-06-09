@@ -96,7 +96,7 @@ def generate_reply(tweet_text: str, media_urls: list[str]) -> str:
     # Gemini API 呼び出し
     client = genai.Client(api_key=GEMINI_API_KEY)
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(max_output_tokens=150),
     )
